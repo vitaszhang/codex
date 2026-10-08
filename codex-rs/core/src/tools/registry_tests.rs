@@ -435,6 +435,15 @@ async fn readiness_selects_exact_tool_with_registry_owned_exposure() {
             .tool(&codex_tools::ToolName::namespaced("mcp__missing__", "echo"))
             .is_none()
     );
+    for name in [
+        codex_tools::ToolName::plain("mcp__server__echo"),
+        codex_tools::ToolName::plain("mcp__server__echo").with_default_namespace(),
+    ] {
+        assert_eq!(
+            registry.tool(&name).map(|tool| tool.tool_name()),
+            Some(namespaced_name.clone()),
+        );
+    }
     assert_eq!(
         [
             plain_readiness_waits.load(Ordering::Relaxed),

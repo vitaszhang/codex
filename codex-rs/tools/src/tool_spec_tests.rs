@@ -11,6 +11,8 @@ use crate::ResponsesApiTool;
 use crate::create_tools_json_for_responses_api;
 use crate::create_tools_json_for_responses_lite;
 use crate::create_tools_raw_json_for_responses_api;
+use crate::flatten_tool_specs_for_responses_api;
+use crate::responses_api_flat_tool_name;
 use codex_protocol::config_types::WebSearchContextSize;
 use codex_protocol::config_types::WebSearchFilters as ConfigWebSearchFilters;
 use codex_protocol::config_types::WebSearchUserLocation as ConfigWebSearchUserLocation;
@@ -113,6 +115,78 @@ fn web_search_config_converts_to_responses_api_types() {
             timezone: Some("America/Los_Angeles".to_string()),
         }
     );
+}
+
+#[test]
+fn responses_api_flat_tool_name_joins_namespace_and_tool() {
+    assert_eq!(
+        responses_api_flat_tool_name("mcp__chrome_devtools", "navigate_page"),
+        "mcp__chrome_devtools__navigate_page"
+    );
+    assert_eq!(
+        responses_api_flat_tool_name("mcp__demo__", "lookup_order"),
+        "mcp__demo__lookup_order"
+    );
+}
+
+#[test]
+fn flatten_tool_specs_for_responses_api_omits_hosted_tools_only() {
+    let tools = flatten_tool_specs_for_responses_api(&[
+        ToolSpec::ToolSearch {
+            execution: "client".to_string(),
+            description: "Search tools".to_string(),
+            parameters: responses_lite_function("search").parameters,
+        },
+        ToolSpec::Function(responses_lite_function("exec_command")),
+        ToolSpec::Freeform(FreeformTool {
+            name: "apply_patch".to_string(),
+            description: "Apply a patch".to_string(),
+            defer_loading: None,
+            format: FreeformToolFormat {
+                r#type: "grammar".to_string(),
+                syntax: "lark".to_string(),
+                definition: "start: /.+/".to_string(),
+            },
+        }),
+        ToolSpec::WebSearch {
+            external_web_access: Some(true),
+            indexed_web_access: None,
+            filters: None,
+            user_location: None,
+            search_context_size: None,
+            search_content_types: None,
+        },
+        ToolSpec::Namespace(ResponsesApiNamespace {
+            name: "functions".to_string(),
+            description: "Default tools".to_string(),
+            tools: vec![ResponsesApiNamespaceTool::Function(
+                responses_lite_function("lookup_order"),
+            )],
+        }),
+        ToolSpec::Namespace(ResponsesApiNamespace {
+            name: "mcp__chrome_devtools".to_string(),
+            description: "Chrome tools".to_string(),
+            tools: vec![ResponsesApiNamespaceTool::Function(
+                responses_lite_function("navigate_page"),
+            )],
+        }),
+    ]);
+
+    assert_eq!(
+        tools.iter().map(ToolSpec::name).collect::<Vec<_>>(),
+        [
+            "exec_command",
+            "apply_patch",
+            "lookup_order",
+            "mcp__chrome_devtools__navigate_page",
+        ]
+    );
+    assert!(matches!(tools[1], ToolSpec::Freeform(_)));
+    assert!(matches!(tools[2], ToolSpec::Function(_)));
+    assert!(matches!(tools[3], ToolSpec::Function(_)));
+    let serialized = create_tools_json_for_responses_api(&tools).expect("serialize tools");
+    assert!(!serialized.iter().any(|tool| tool["type"] == "web_search"));
+    assert!(!serialized.iter().any(|tool| tool["type"] == "tool_search"));
 }
 
 #[test]

@@ -99,9 +99,11 @@ use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::W3cTraceContext;
 use codex_rollout_trace::InferenceTraceAttempt;
 use codex_rollout_trace::InferenceTraceContext;
+use codex_tools::ToolSpec;
 use codex_tools::create_tools_json_for_responses_api;
 use codex_tools::create_tools_json_for_responses_lite;
 use codex_tools::create_tools_raw_json_for_responses_api;
+use codex_tools::flatten_tool_specs_for_responses_api;
 use eventsource_stream::Event;
 use eventsource_stream::EventStreamError;
 use futures::StreamExt;
@@ -899,6 +901,13 @@ impl ModelClient {
             input.retain(|item| !matches!(item, ResponseItem::ConfigurationUpdate { .. }));
         }
         let is_openai = self.state.provider.info().is_openai();
+        let flattened_tools;
+        let tools_for_request: &[ToolSpec] = if is_openai {
+            prompt.tools.as_ref()
+        } else {
+            flattened_tools = flatten_tool_specs_for_responses_api(prompt.tools.as_ref());
+            flattened_tools.as_slice()
+        };
         let (instructions, tools) = if model_info.use_responses_lite {
             // These prompt-only items are rebuilt on every request. Hash their visible payloads
             // within the thread so retries and resumed sessions preserve their identity.
@@ -906,10 +915,10 @@ impl ModelClient {
                 &Uuid::NAMESPACE_OID,
                 self.state.thread_id.to_string().as_bytes(),
             );
-            let tools = if self.state.provider.capabilities().namespace_tools {
-                create_tools_json_for_responses_lite(&prompt.tools)?
+            let tools = if is_openai && self.state.provider.capabilities().namespace_tools {
+                create_tools_json_for_responses_lite(tools_for_request)?
             } else {
-                create_tools_json_for_responses_api(&prompt.tools)?
+                create_tools_json_for_responses_api(tools_for_request)?
             };
             let mut prefix = vec![ResponseItem::AdditionalTools {
                 id: Some(ResponseItemId::with_suffix(
@@ -932,9 +941,10 @@ impl ModelClient {
             input.splice(0..0, prefix);
             (String::new(), None)
         } else {
+            let tools_raw = create_tools_raw_json_for_responses_api(tools_for_request)?;
             (
                 prompt.base_instructions.text.clone(),
-                Some(create_tools_raw_json_for_responses_api(&prompt.tools)?.into()),
+                Some(tools_raw.into()),
             )
         };
         if !is_openai {

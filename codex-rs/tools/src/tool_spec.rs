@@ -141,6 +141,62 @@ pub fn create_tools_json_for_responses_lite(
     Ok(tools_json)
 }
 
+const RESPONSES_API_NAMESPACE_NAME_DELIMITER: &str = "__";
+
+/// Joins a Responses API namespace and nested tool name into a single flat tool name.
+///
+/// Third-party Responses providers that only accept top-level `function` tools use this
+/// shape when flattening `type: namespace` entries before sending a request.
+pub fn responses_api_flat_tool_name(namespace: &str, name: &str) -> String {
+    let namespace = namespace.trim_end_matches('_');
+    let name = name.trim_start_matches('_');
+    format!("{namespace}{RESPONSES_API_NAMESPACE_NAME_DELIMITER}{name}")
+}
+
+/// Expands `type: namespace` tools into top-level function/custom tools and omits hosted tools.
+///
+/// Providers that do not understand Responses namespace tools need model-callable tools at the
+/// top level. Hosted `web_search` and `tool_search` are omitted because they are not standard
+/// function tools and some compatible gateways reject them before processing the request.
+pub fn flatten_tool_specs_for_responses_api(tools: &[ToolSpec]) -> Vec<ToolSpec> {
+    let mut flattened = Vec::with_capacity(tools.len());
+    for tool in tools {
+        match tool {
+            ToolSpec::Function(function) => flattened.push(ToolSpec::Function(function.clone())),
+            ToolSpec::Namespace(namespace) => {
+                for nested in &namespace.tools {
+                    let name = match nested {
+                        ResponsesApiNamespaceTool::Function(function) => &function.name,
+                        ResponsesApiNamespaceTool::Custom(custom) => &custom.name,
+                    };
+                    let name = if namespace.name == DEFAULT_FUNCTION_NAMESPACE {
+                        name.clone()
+                    } else {
+                        responses_api_flat_tool_name(&namespace.name, name)
+                    };
+                    match nested {
+                        ResponsesApiNamespaceTool::Function(function) => {
+                            flattened.push(ToolSpec::Function(ResponsesApiTool {
+                                name,
+                                ..function.clone()
+                            }));
+                        }
+                        ResponsesApiNamespaceTool::Custom(custom) => {
+                            flattened.push(ToolSpec::Freeform(FreeformTool {
+                                name,
+                                ..custom.clone()
+                            }));
+                        }
+                    }
+                }
+            }
+            ToolSpec::ToolSearch { .. } | ToolSpec::WebSearch { .. } => {}
+            ToolSpec::Freeform(freeform) => flattened.push(ToolSpec::Freeform(freeform.clone())),
+        }
+    }
+    flattened
+}
+
 /// Returns raw JSON that can be embedded directly in a Responses API request.
 pub fn create_tools_raw_json_for_responses_api(
     tools: &[ToolSpec],

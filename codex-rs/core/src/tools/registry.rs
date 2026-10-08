@@ -488,9 +488,28 @@ impl ToolRegistry {
     }
 
     pub(crate) fn tool(&self, name: &ToolName) -> Option<Arc<dyn CoreToolRuntime>> {
-        self.tools
-            .get(&name.clone().with_default_namespace())
+        self.registered_tool(name)
             .map(|tool| Arc::clone(&tool.runtime))
+    }
+
+    fn registered_tool(&self, name: &ToolName) -> Option<&RegisteredTool> {
+        let normalized = name.clone().with_default_namespace();
+        if let Some(tool) = self.tools.get(&normalized) {
+            return Some(tool);
+        }
+        if name.is_default_namespace() {
+            for (registered_name, tool) in &self.tools {
+                let Some(namespace) = registered_name.namespace.as_deref() else {
+                    continue;
+                };
+                if codex_tools::responses_api_flat_tool_name(namespace, &registered_name.name)
+                    == name.name
+                {
+                    return Some(tool);
+                }
+            }
+        }
+        None
     }
 
     #[cfg(test)]
@@ -515,7 +534,7 @@ impl ToolRegistry {
     }
 
     pub(crate) fn supports_parallel_tool_calls(&self, name: &ToolName) -> Option<bool> {
-        let tool = self.tools.get(&name.clone().with_default_namespace())?;
+        let tool = self.registered_tool(name)?;
         Some(tool.exposure != ToolExposure::Hidden && tool.runtime.supports_parallel_tool_calls())
     }
 

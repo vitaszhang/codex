@@ -111,3 +111,5 @@ pub use tool_spec::ToolSpec;
 pub use tool_spec::create_tools_json_for_responses_api;
 pub use tool_spec::create_tools_json_for_responses_lite;
 pub use tool_spec::create_tools_raw_json_for_responses_api;
+pub use tool_spec::flatten_tool_specs_for_responses_api;
+pub use tool_spec::responses_api_flat_tool_name;

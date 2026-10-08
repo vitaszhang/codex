@@ -3029,7 +3029,9 @@ async fn try_run_sampling_request(
                     sess.send_event(&turn_context, EventMsg::ReasoningContentDelta(event))
                         .await;
                 } else {
-                    error_or_panic("ReasoningSummaryDelta without active item".to_string());
+                    // Some third-party Responses providers emit reasoning summary
+                    // deltas before `output_item.added` parses into a TurnItem.
+                    continue;
                 }
             }
             ResponseEvent::ReasoningSummaryPartAdded { summary_index } => {
